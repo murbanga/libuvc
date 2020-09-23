@@ -136,6 +136,7 @@ struct format_table_entry *_get_format_entry(enum uvc_frame_format format) {
       {'M',  'J',  'P',  'G'})
     FMT(UVC_FRAME_FORMAT_H264,
       {'H',  '2',  '6',  '4', 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
+
     default:
       return NULL;
   }
@@ -788,8 +789,7 @@ void _uvc_process_payload(uvc_stream_handle_t *strmh, uint8_t *payload, size_t p
 void LIBUSB_CALL _uvc_stream_callback(struct libusb_transfer *transfer) {
   uvc_stream_handle_t *strmh = transfer->user_data;
 
-  int resubmit = 1;
-  
+  int resubmit = 1;  
   switch (transfer->status) {
   case LIBUSB_TRANSFER_COMPLETED:
     if (transfer->num_iso_packets == 0) {
@@ -838,7 +838,7 @@ void LIBUSB_CALL _uvc_stream_callback(struct libusb_transfer *transfer) {
       UVC_DEBUG("transfer %p not found; not freeing!", transfer);
     }
 
-    resubmit = 0;//(transfer->status == LIBUSB_TRANSFER_ERROR);
+    resubmit = 0;
 
     pthread_cond_broadcast(&strmh->cb_cond);
     pthread_mutex_unlock(&strmh->cb_mutex);

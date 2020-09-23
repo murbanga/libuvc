@@ -6,6 +6,8 @@
 #include <opencv2/core/core_c.h>
 #include <opencv2/highgui/highgui_c.h>
 
+
+
 static volatile int total_frame_count = 0;
 static int enable_dump = 0;
 
@@ -24,11 +26,17 @@ void dumpee(const void *p, size_t size)
   }
 }
 
+struct Data
+{
+  void *data;
+  size_t size;
+};
+
 /* This callback function runs once per frame. Use it to perform any
  * quick processing you need, or have it put the frame into your application's
  * input queue. If this function takes too long, you'll start losing frames. */
 void cb(uvc_frame_t *frame, void *ptr) {
-  uvc_frame_t *bgr;
+  struct Data *p = (struct Data *)ptr;
   uvc_error_t ret;
   enum uvc_frame_format *frame_format = (enum uvc_frame_format *)ptr;
 
@@ -40,11 +48,13 @@ void cb(uvc_frame_t *frame, void *ptr) {
         dumpee(frame->data, frame->data_bytes);
       }
 
+      memcpy(p->data, frame->data, (p->size < frame->data_bytes ? p->size : frame->data_bytes));
+
       IplImage*cvImg = cvCreateImageHeader(
         cvSize(frame->width, frame->height),
         IPL_DEPTH_16U,
         1);
-      cvSetData(cvImg, frame->data, frame->width*2); 
+      cvSetData(cvImg, p->data, frame->width*2); 
       cvNamedWindow("Test", CV_WINDOW_AUTOSIZE);
       cvShowImage("Test", cvImg);
       cvWaitKey(10);
@@ -176,17 +186,23 @@ int main(int argc, char **argv) {
       if (res < 0) {
         uvc_perror(res, "get_mode"); /* device doesn't provide a matching stream */
       } else {
-        /* Start the video stream. The library will call user function cb:
-         *   cb(frame, (void *) 12345)
-         */
-        res = uvc_start_streaming(devh, &ctrl, cb, (void *) 12345, 0);
+        struct Data p;
+        p.data = malloc(width*height*2);
+        p.size = width*height*2;
+        res = uvc_start_streaming(devh, &ctrl, cb, &p, 0);
 
         if (res < 0) {
           uvc_perror(res, "start_streaming"); /* unable to start stream */
         } else {
-          puts("Streaming...");
+          printf("Streaming...\n");
 
-          uvc_set_ae_mode(devh, 2); /* e.g., turn on auto exposure */
+          //uvc_set_ae_mode(devh, 1); /* e.g., turn on auto exposure */
+
+          if(exposure > 0)
+          {
+            printf("setting exposure to %fs\n", exposure * 0.0001f);
+            uvc_set_exposure_abs(devh, exposure);
+          }
 
           while(total_frame_count < max_frame_count || max_frame_count < 0)
           {
