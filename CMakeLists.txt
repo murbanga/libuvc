@@ -39,6 +39,8 @@ set(SOURCES
   src/misc.c
 )
 
+find_package(OpenCV REQUIRED)
+
 find_package(LibUSB)
 
 # JpegPkg name to differ from shipped with CMake
@@ -134,6 +136,8 @@ if(BUILD_EXAMPLE)
     PRIVATE
       LibUVC::UVC
       Threads::Threads
+      opencv_core
+      opencv_highgui
   )
 endif()
 

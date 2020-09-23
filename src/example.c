@@ -1,6 +1,28 @@
 #include "libuvc/libuvc.h"
 #include <stdio.h>
 #include <unistd.h>
+#include <string.h>
+#include <stdlib.h>
+#include <opencv2/core/core_c.h>
+#include <opencv2/highgui/highgui_c.h>
+
+static volatile int total_frame_count = 0;
+static int enable_dump = 0;
+
+void dumpee(const void *p, size_t size)
+{
+  char filename[256];
+  snprintf(filename, sizeof(filename), "/tmp/raw-frame-%04d.data", total_frame_count);
+  FILE *f = fopen(filename, "wb");
+  if(f)
+  {
+    fwrite(p, size, 1, f);
+    fclose(f);
+  }
+  else{
+    printf("fail to open file %s\n", filename);
+  }
+}
 
 /* This callback function runs once per frame. Use it to perform any
  * quick processing you need, or have it put the frame into your application's
@@ -9,81 +31,59 @@ void cb(uvc_frame_t *frame, void *ptr) {
   uvc_frame_t *bgr;
   uvc_error_t ret;
   enum uvc_frame_format *frame_format = (enum uvc_frame_format *)ptr;
-  /* FILE *fp;
-   * static int jpeg_count = 0;
-   * static const char *H264_FILE = "iOSDevLog.h264";
-   * static const char *MJPEG_FILE = ".jpeg";
-   * char filename[16]; */
-
-  /* We'll convert the image from YUV/JPEG to BGR, so allocate space */
-  bgr = uvc_allocate_frame(frame->width * frame->height * 3);
-  if (!bgr) {
-    printf("unable to allocate bgr frame!\n");
-    return;
-  }
-
-  printf("callback! frame_format = %d, width = %d, height = %d, length = %lu, ptr = %d\n",
-    frame->frame_format, frame->width, frame->height, frame->data_bytes, (int) ptr);
 
   switch (frame->frame_format) {
-  case UVC_FRAME_FORMAT_H264:
-    /* use `ffplay H264_FILE` to play */
-    /* fp = fopen(H264_FILE, "a");
-     * fwrite(frame->data, 1, frame->data_bytes, fp);
-     * fclose(fp); */
-    break;
-  case UVC_COLOR_FORMAT_MJPEG:
-    /* sprintf(filename, "%d%s", jpeg_count++, MJPEG_FILE);
-     * fp = fopen(filename, "w");
-     * fwrite(frame->data, 1, frame->data_bytes, fp);
-     * fclose(fp); */
-    break;
-  case UVC_COLOR_FORMAT_YUYV:
-    /* Do the BGR conversion */
-    ret = uvc_any2bgr(frame, bgr);
-    if (ret) {
-      uvc_perror(ret, "uvc_any2bgr");
-      uvc_free_frame(bgr);
-      return;
+  case UVC_FRAME_FORMAT_GRAY16:
+    {
+      if(enable_dump)
+      {
+        dumpee(frame->data, frame->data_bytes);
+      }
+
+      IplImage*cvImg = cvCreateImageHeader(
+        cvSize(frame->width, frame->height),
+        IPL_DEPTH_16U,
+        1);
+      cvSetData(cvImg, frame->data, frame->width*2); 
+      cvNamedWindow("Test", CV_WINDOW_AUTOSIZE);
+      cvShowImage("Test", cvImg);
+      cvWaitKey(10);
+   
+      cvReleaseImageHeader(&cvImg);
+      total_frame_count++;
     }
-    break;
   default:
     break;
   }
+}
 
-  /* Call a user function:
-   *
-   * my_type *my_obj = (*my_type) ptr;
-   * my_user_function(ptr, bgr);
-   * my_other_function(ptr, bgr->data, bgr->width, bgr->height);
-   */
-
-  /* Call a C++ method:
-   *
-   * my_type *my_obj = (*my_type) ptr;
-   * my_obj->my_func(bgr);
-   */
-
-  /* Use opencv.highgui to display the image:
-   * 
-   * cvImg = cvCreateImageHeader(
-   *     cvSize(bgr->width, bgr->height),
-   *     IPL_DEPTH_8U,
-   *     3);
-   *
-   * cvSetData(cvImg, bgr->data, bgr->width * 3); 
-   *
-   * cvNamedWindow("Test", CV_WINDOW_AUTOSIZE);
-   * cvShowImage("Test", cvImg);
-   * cvWaitKey(10);
-   *
-   * cvReleaseImageHeader(&cvImg);
-   */
-
-  uvc_free_frame(bgr);
+void status_cb(enum uvc_status_class status_class,
+                                    int event,
+                                    int selector,
+                                    enum uvc_status_attribute status_attribute,
+                                    void *data, size_t data_len,
+                                    void *user_ptr)
+{
+  printf("status callback(%d, %d, %d, %d, %p, %d)\n", status_class, event, selector, status_attribute, data, data_len);
 }
 
 int main(int argc, char **argv) {
+
+  int format_idx = -1;
+  int exposure = 0;
+  int max_frame_count = -1;
+
+  for(int i = 1; i < argc; ++i) {
+    if(!strcmp(argv[i], "--format") || !strcmp(argv[i], "-f"))
+      format_idx = atoi(argv[++i]);
+    else if(!strcmp(argv[i], "--exposure") || !strcmp(argv[i], "-e"))
+      exposure = atoi(argv[++i]);
+    else if(!strcmp(argv[i], "-n"))
+      max_frame_count = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--dump") || !strcmp(argv[i], "-d"))
+      enable_dump = 1;
+  }
+
   uvc_context_t *ctx;
   uvc_device_t *dev;
   uvc_device_handle_t *devh;
@@ -120,12 +120,24 @@ int main(int argc, char **argv) {
     } else {
       puts("Device opened");
 
+      uvc_set_status_callback(devh, status_cb, 0);
+
       /* Print out a message containing all the information that libuvc
        * knows about the device */
       uvc_print_diag(devh, stderr);
 
       const uvc_format_desc_t *format_desc = uvc_get_format_descs(devh);
-      const uvc_frame_desc_t *frame_desc = format_desc->frame_descs;
+
+      const uvc_frame_desc_t *frame_desc = format_desc->frame_descs->next;
+      if(format_idx > -1)
+      {
+        while(format_idx > 0)
+        {
+          frame_desc = format_desc->frame_descs->next;
+          format_idx--;
+        }
+      }
+
       enum uvc_frame_format frame_format;
       int width = 640;
       int height = 480;
@@ -139,7 +151,7 @@ int main(int argc, char **argv) {
         frame_format = UVC_FRAME_FORMAT_H264;
         break;
       default:
-        frame_format = UVC_FRAME_FORMAT_YUYV;
+        frame_format = UVC_FRAME_FORMAT_GRAY16;
         break;
       }
 
@@ -174,9 +186,12 @@ int main(int argc, char **argv) {
         } else {
           puts("Streaming...");
 
-          uvc_set_ae_mode(devh, 1); /* e.g., turn on auto exposure */
+          uvc_set_ae_mode(devh, 2); /* e.g., turn on auto exposure */
 
-          sleep(10); /* stream for 10 seconds */
+          while(total_frame_count < max_frame_count || max_frame_count < 0)
+          {
+            usleep(1000);
+          }
 
           /* End the stream. Blocks until last callback is serviced */
           uvc_stop_streaming(devh);
