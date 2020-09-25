@@ -26,6 +26,25 @@ void dumpee(const void *p, size_t size)
   }
 }
 
+void byteswap_u16(uint16_t *dst, size_t dst_size, const uint16_t *src, size_t src_size_bytes)
+{
+  size_t n = (dst_size < src_size_bytes ? dst_size : src_size_bytes)/sizeof(uint16_t);
+  for(size_t i = 0; i < n; ++i)
+  {
+    uint16_t a = src[i];
+    dst[i] = (a & 0x0FFF) << 4;
+  }
+}
+
+void print_array(const uint16_t *p, size_t len, size_t step)
+{
+  for(size_t i = 0; i < len; ++i)
+  {
+    printf("%04x,", p[i*step]);
+  }
+  printf("\n");
+}
+
 struct Data
 {
   void *data;
@@ -43,18 +62,21 @@ void cb(uvc_frame_t *frame, void *ptr) {
   switch (frame->frame_format) {
   case UVC_FRAME_FORMAT_GRAY16:
     {
+      print_array(frame->data, 40, 40);
+      byteswap_u16(p->data, p->size, frame->data, frame->data_bytes);
+
       if(enable_dump)
       {
-        dumpee(frame->data, frame->data_bytes);
+        dumpee(p->data, p->size);
       }
 
-      memcpy(p->data, frame->data, (p->size < frame->data_bytes ? p->size : frame->data_bytes));
+      //memcpy(p->data, frame->data, (p->size < frame->data_bytes ? p->size : frame->data_bytes));
 
       IplImage*cvImg = cvCreateImageHeader(
         cvSize(frame->width, frame->height),
         IPL_DEPTH_16U,
         1);
-      cvSetData(cvImg, p->data, frame->width*2); 
+      cvSetData(cvImg, p->data, frame->width*2);
       cvNamedWindow("Test", CV_WINDOW_AUTOSIZE);
       cvShowImage("Test", cvImg);
       cvWaitKey(10);
@@ -74,7 +96,7 @@ void status_cb(enum uvc_status_class status_class,
                                     void *data, size_t data_len,
                                     void *user_ptr)
 {
-  printf("status callback(%d, %d, %d, %d, %p, %d)\n", status_class, event, selector, status_attribute, data, data_len);
+//  printf("status callback(%d, %d, %d, %d, %p, %d)\n", status_class, event, selector, status_attribute, data, data_len);
 }
 
 int main(int argc, char **argv) {
@@ -203,6 +225,11 @@ int main(int argc, char **argv) {
             printf("setting exposure to %fs\n", exposure * 0.0001f);
             uvc_set_exposure_abs(devh, exposure);
           }
+          else
+          {
+            uvc_set_ae_mode(devh, 2);
+          }
+          
 
           while(total_frame_count < max_frame_count || max_frame_count < 0)
           {
